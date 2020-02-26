@@ -4,8 +4,8 @@ from skimage.feature import (match_descriptors, corner_peaks, corner_fast,
                              plot_matches, BRIEF)
 import matplotlib.pyplot as plt
 
-img1 = io.imread("./data/highway/input/in000250.jpg", as_gray=True)
-img2 = io.imread("./data/highway/input/in000260.jpg", as_gray=True)
+img1 = io.imread("./data/training/image_2/000000_10.png", as_gray=True)
+img2 = io.imread("./data/training/image_2/000000_11.png", as_gray=True)
 
 pc1 = corner_peaks(corner_fast(img1), min_distance=5)
 pc2 = corner_peaks(corner_fast(img2), min_distance=5)
@@ -22,7 +22,7 @@ extractor.extract(img1, pc1)
 desc1 = extractor.descriptors
 extractor.extract(img2,pc2)
 desc2 = extractor.descriptors
-matches = match_descriptors(desc1, desc2, cross_check=True)
+matches = match_descriptors(desc1, desc2, metric="hamming", cross_check=True)
 
 fig = plt.figure(figsize=(18, 10))
 ax0 = plt.subplot()
@@ -30,5 +30,7 @@ plot_matches(ax0,img1, img2, pc1, pc2, matches)
 ax0.axis('off')
 ax0.set_title("Image1 vs. Image2")
 plt.show()
+
+
 
 
