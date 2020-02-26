@@ -212,94 +212,29 @@ def aggregate_costs(cost_volume, parameters, paths):
     return aggregation_volume
 
 
-def compute_costs(left, right, parameters, save_images):
+def compute_costs_brief(left, right, max_disparity):
     """
     first step of the sgm algorithm, matching cost based on census transform and hamming distance.
     :param left: left image.
     :param right: right image.
-    :param parameters: structure containing parameters of the algorithm.
-    :param save_images: whether to save census images or not.
     :return: H x W x D array with the matching costs.
     """
     assert left.shape[0] == right.shape[0] and left.shape[1] == right.shape[1], 'left & right must have the same shape.'
-    assert parameters.max_disparity > 0, 'maximum disparity must be greater than 0.'
+    assert max_disparity > 0, 'maximum disparity must be greater than 0.'
 
     height = left.shape[0]
     width = left.shape[1]
-    cheight = parameters.csize[0]
-    cwidth = parameters.csize[1]
-    y_offset = int(cheight / 2)
-    x_offset = int(cwidth / 2)
-    disparity = parameters.max_disparity
-
-    left_img_census = np.zeros(shape=(height, width), dtype=np.uint8)
-    right_img_census = np.zeros(shape=(height, width), dtype=np.uint8)
-    left_census_values = np.zeros(shape=(height, width), dtype=np.uint64)
-    right_census_values = np.zeros(shape=(height, width), dtype=np.uint64)
-
-    print('\tComputing left and right census...', end='')
-    sys.stdout.flush()
-    dawn = t.time()
-    # pixels on the border will have no census values
-    for y in range(y_offset, height - y_offset):
-        for x in range(x_offset, width - x_offset):
-            left_census = np.int64(0)
-            center_pixel = left[y, x]
-            reference = np.full(shape=(cheight, cwidth), fill_value=center_pixel, dtype=np.int64)
-            image = left[(y - y_offset):(y + y_offset + 1), (x - x_offset):(x + x_offset + 1)]
-            comparison = image - reference
-            for j in range(comparison.shape[0]):
-                for i in range(comparison.shape[1]):
-                    if (i, j) != (y_offset, x_offset):
-                        left_census = left_census << 1
-                        if comparison[j, i] < 0:
-                            bit = 1
-                        else:
-                            bit = 0
-                        left_census = left_census | bit
-            left_img_census[y, x] = np.uint8(left_census)
-            left_census_values[y, x] = left_census
-
-            right_census = np.int64(0)
-            center_pixel = right[y, x]
-            reference = np.full(shape=(cheight, cwidth), fill_value=center_pixel, dtype=np.int64)
-            image = right[(y - y_offset):(y + y_offset + 1), (x - x_offset):(x + x_offset + 1)]
-            comparison = image - reference
-            for j in range(comparison.shape[0]):
-                for i in range(comparison.shape[1]):
-                    if (i, j) != (y_offset, x_offset):
-                        right_census = right_census << 1
-                        if comparison[j, i] < 0:
-                            bit = 1
-                        else:
-                            bit = 0
-                        right_census = right_census | bit
-            right_img_census[y, x] = np.uint8(right_census)
-            right_census_values[y, x] = right_census
-
-    dusk = t.time()
-    print('\t(done in {:.2f}s)'.format(dusk - dawn))
-
-    if save_images:
-        cv2.imwrite('left_census.png', left_img_census)
-        cv2.imwrite('right_census.png', right_img_census)
 
     print('\tComputing cost volumes...', end='')
     sys.stdout.flush()
     dawn = t.time()
-    left_cost_volume = np.zeros(shape=(height, width, disparity), dtype=np.uint32)
-    right_cost_volume = np.zeros(shape=(height, width, disparity), dtype=np.uint32)
-    lcensus = np.zeros(shape=(height, width), dtype=np.int64)
-    rcensus = np.zeros(shape=(height, width), dtype=np.int64)
-    for d in range(0, disparity):
-        rcensus[:, (x_offset + d):(width - x_offset)] = right_census_values[:, x_offset:(width - d - x_offset)]
-        left_xor = np.int64(np.bitwise_xor(np.int64(left_census_values), rcensus))
-        left_distance = np.zeros(shape=(height, width), dtype=np.uint32)
-        while not np.all(left_xor == 0):
-            tmp = left_xor - 1
-            mask = left_xor != 0
-            left_xor[mask] = np.bitwise_and(left_xor[mask], tmp[mask])
-            left_distance[mask] = left_distance[mask] + 1
+    left_cost_volume = np.zeros(shape=(height, width, max_disparity), dtype=np.uint32)
+    right_cost_volume = np.zeros(shape=(height, width, max_disparity), dtype=np.uint32)
+    for d in range(0, max_disparity):
+        right_offset = np.zeros(shape=(height, width))
+        right_offset[:, d:width] = right[:, 0:(width - d)]
+        left_xor = np.int64(np.bitwise_xor(np.int64(left), right_offset))
+        # distance de hamming
         left_cost_volume[:, :, d] = left_distance
 
         lcensus[:, x_offset:(width - d - x_offset)] = left_census_values[:, (x_offset + d):(width - x_offset)]
@@ -354,7 +289,7 @@ def get_recall(disparity, gt, args):
     return float(correct) / gt.size
 
 
-def sgm():
+def sgm(left_desc, right_desc, max_disparity, type = "brief"):
     """
     main function applying the semi-global matching algorithm.
     :return: void.
@@ -381,19 +316,15 @@ def sgm():
 
     dawn = t.time()
 
-    parameters = Parameters(max_disparity=disparity, P1=10, P2=120, csize=(7, 7), bsize=(3, 3))
+    parameters = Parameters(max_disparity=max_disp, P1=10, P2=120, csize=(7, 7), bsize=(3, 3))
     paths = Paths()
 
-    print('\nLoading images...')
-    left, right = load_images(left_name, right_name, parameters)
-
     print('\nStarting cost computation...')
-    left_cost_volume, right_cost_volume = compute_costs(left, right, parameters, save_images)
-    if save_images:
-        left_disparity_map = np.uint8(normalize(np.argmin(left_cost_volume, axis=2), parameters))
-        cv2.imwrite('disp_map_left_cost_volume.png', left_disparity_map)
-        right_disparity_map = np.uint8(normalize(np.argmin(right_cost_volume, axis=2), parameters))
-        cv2.imwrite('disp_map_right_cost_volume.png', right_disparity_map)
+    left_cost_volume, right_cost_volume = (0, 0)
+    if(type == "brief"):
+        left_cost_volume, right_cost_volume = compute_costs_brief(left_desc, right_desc, max_disparity)
+    else:
+        pass
 
     print('\nStarting left aggregation computation...')
     left_aggregation_volume = aggregate_costs(left_cost_volume, parameters, paths)
