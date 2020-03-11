@@ -25,7 +25,7 @@ def experiments():
     right = 'cones/im6.png'
     gt_name = 'cones/disp2.png'
 
-    descriptor = 'brief'
+    descriptor = 'hog'
     if descriptor == 'brief':
         distance = distances.hamming_distance
     else:
